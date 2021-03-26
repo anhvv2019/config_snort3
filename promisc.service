@@ -1,0 +1,12 @@
+[Unit]
+Description=Snort 3 interface promiscuous mode during boot service
+After=network.target
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip link set dev eno1 arp off
+ExecStart=/usr/sbin/ip link set dev eno1 multicast off
+ExecStart=/usr/sbin/ip link set dev eno1 promisc on
+TimeoutStartSec=0
+RemainAfterExit=yes
+[Install]
+WantedBy=default.target

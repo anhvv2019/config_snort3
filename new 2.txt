@@ -1,0 +1,33 @@
+
+
+nano /etc/sysconfig/network-scripts/ifcfg-ens192
+systemctl stop snort.service
+nmcli con up ens192
+nmcli con mod ens192 ethtool.feature-lro off ethtool.feature-gro off ethtool.feature-tso off ethtool.feature-gso off ethtool.feature-sg off ethtool.feature-rx off ethtool.feature-tx off ethtool.feature-rxvlan off ethtool.feature-txvlan off
+
+#ETHTOOL_OPTS="-K ens192 gro off gso off lro off rx off rxvlan off sg off tso off tx off txvlan off"
+
+
+
+ethtool -g ens192
+
+#Ring parameters for ens192:
+#Pre-set maximums:
+#RX:             4096
+#RX Mini:        2048
+#RX Jumbo:       4096
+#TX:             4096
+#Current hardware settings:
+#RX:             1024
+#RX Mini:        128
+#RX Jumbo:       256
+#TX:             512
+
+# Remember set time manual to confirm 
+# date -s "27 FEB 2021 13:40:00"
+
+systemctl daemon-reload
+systemctl enable promisc.service
+reboot now
+
+

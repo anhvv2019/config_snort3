@@ -1,0 +1,9 @@
+[Unit]
+	Description=PulledPork service timer for updating Snort 3 rules
+	Requires=pulledpork.service
+[Timer]
+	Unit=pulledpork.service
+	OnCalendar=*-*-* 00:10:00
+	AccuracySec=1us
+[Install]
+	WantedBy=timers.target

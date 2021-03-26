@@ -1,0 +1,8 @@
+[Unit]
+	Description=PulledPork service for updating Snort 3 rules
+	Wants=pulledpork.timer
+[Service]
+	Type=oneshot
+	ExecStart=perl /usr/local/pulledpork/pulledpork.pl -c /usr/local/pulledpork/etc/pulledpork.conf -PE -v -I security -T -H SIGHUP
+[Install]
+	WantedBy=multi-user.target
