@@ -1,0 +1,179 @@
+#!/bin/bash
+clear
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Preparing to install IDS.                                         '
+echo 'Make sure everything up to date.                                  '
+echo '__________________________________________________________________'
+mkdir /var/log/snort
+dnf config-manager --set-enabled ol8_codeready_builder
+dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
+dnf config-manager --set-enabled epel
+dnf install git mc -y
+dnf upgrade -y
+cd $HOME && mkdir sources && cd sources
+git clone https://github.com/anhvv2019/config_snort3.git
+echo /usr/local/lib > /etc/ld.so.conf.d/local.conf
+echo /usr/local/lib64 >> /etc/ld.so.conf.d/local.conf
+ldconfig
+dnf install flex bison gcc gcc-c++ make cmake automake autoconf libtool libpcap-devel pcre-devel libdnet-devel hwloc-devel openssl-devel zlib-devel luajit-devel pkgconf libmnl-devel -y
+dnf install libunwind-devel libnfnetlink-devel libnetfilter_queue-devel w3m xz-devel libuuid-devel hyperscan hyperscan-devel libsafec libsafec-devel gperftools-devel -y
+dnf install perl-LWP-UserAgent-Determined perl-Net-SSLeay perl-LWP-Protocol-https perl-Sys-Syslog perl-Archive-Tar -y
+git clone https://github.com/snort3/libdaq.git
+cd libdaq/ && ./bootstrap && ./configure && make && make install
+ldconfig
+cd $HOME && cd sources
+curl -Lo flatbuffers-1.12.tar.gz https://github.com/google/flatbuffers/archive/v1.12.0.tar.gz
+tar xf flatbuffers-1.12.tar.gz
+mkdir fb-build && cd fb-build
+cmake ../flatbuffers-1.12.0
+make -j$(nproc) && make -j$(nproc) install && ldconfig
+cd ../
+ln -s /usr/lib64/pkgconfig/safec-3.3.pc /usr/lib64/pkgconfig/libsafec.pc
+git clone https://github.com/snort3/snort3.git
+cd snort3
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH 
+export PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig:$PKG_CONFIG_PATH
+export CFLAGS="-O3" && export CXXFLAGS="-O3 -fno-rtti"
+export SNORT_LUA_PATH=/usr/local/snort/etc/snort/snort
+./configure_cmake.sh --prefix=/usr/local/snort --enable-tcmalloc
+cd build/
+make -j$(nproc) && make -j$(nproc) install
+cd ../../
+/usr/local/snort/bin/snort -V
+cd $HOME && cd sources
+git clone https://github.com/snort3/snort3_extra.git
+cd snort3_extra
+export PKG_CONFIG_PATH=/usr/local/snort/lib64/pkgconfig:$PKG_CONFIG_PATH
+./configure_cmake.sh --prefix=/usr/local/snort/extra
+cd build/ && make -j$(nproc) && make -j$(nproc) install
+cd ../../
+groupadd snort
+useradd snort -r -M -g snort -s /sbin/nologin -c SNORT_SERVICE_ACCOUNT
+chmod -R 5700 /var/log/snort
+chown -R snort:snort /var/log/snort
+chcon --reference /var/log /var/log/snort
+mkdir -p /usr/local/snort/{builtin_rules,rules,appid,intel}
+curl -Lo snortrules-snapshot-3000.tar.gz https://www.snort.org/downloads/registered/snortrules-snapshot-3000.tar.gz?oinkcode=c76801b89419d6c42aa5e2eb770d6ed9d18bfa30
+tar xf snortrules-snapshot-3000.tar.gz
+\cp rules/*.rules /usr/local/snort/rules/
+\cp builtins/builtins.rules /usr/local/snort/builtin_rules/
+\cp etc/snort_defaults.lua etc/snort.lua /usr/local/snort/etc/snort/
+curl -Lo snort-openappid.tar.gz https://www.snort.org/downloads/openappid/16584
+tar xf snort-openappid.tar.gz
+mv odp/ /usr/local/snort/appid/
+curl -Lo ip-blocklist https://www.talosintelligence.com/documents/ip-blacklist
+mv ip-blocklist /usr/local/snort/intel/
+touch /usr/local/snort/intel/ip-passlist
+cd $HOME
+\cp sources/config_snort3/snort.lua /usr/local/snort/etc/snort/
+\cp sources/config_snort3/snort_defaults.lua /usr/local/snort/etc/snort/
+ls /usr/local/snort/etc/snort/
+ls /usr/local/snort/etc/snort/ -la
+cd $HOME && cd sources
+mkdir -p /usr/local/pulledpork/etc
+git clone https://github.com/shirkdog/pulledpork.git
+\cp pulledpork/pulledpork.pl /usr/local/pulledpork/
+\cp pulledpork/etc/* /usr/local/pulledpork/etc/
+\cp sources/config_snort3/pulledpork/pulledpork.service /etc/systemd/system/
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Create /etc/systemd/system/pulledpork.service                     '
+echo '__________________________________________________________________'
+echo [Unit] > /etc/systemd/system/pulledpork.service
+echo Description=PulledPork service for updating Snort 3 rules  >> /etc/systemd/system/pulledpork.service
+echo Wants=pulledpork.timer  >> /etc/systemd/system/pulledpork.service
+echo [Service]  >> /etc/systemd/system/pulledpork.service
+echo Type=oneshot  >> /etc/systemd/system/pulledpork.service
+echo ExecStart=perl /usr/local/pulledpork/pulledpork.pl -c /usr/local/pulledpork/etc/pulledpork.conf -PE -v -I security -T -H SIGHUP  >> /etc/systemd/system/pulledpork.service
+echo [Install]  >> /etc/systemd/system/pulledpork.service
+echo WantedBy=multi-user.target  >> /etc/systemd/system/pulledpork.service
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Create /usr/local/pulledpork/etc/pulledpork.conf                  '
+echo '__________________________________________________________________'
+mv /usr/local/pulledpork/etc/pulledpork.conf /usr/local/pulledpork/etc/pulledpork.conf.bak
+echo 'rule_url=https://www.snort.org/reg-rules/|snortrules-snapshot.tar.gz|c76801b89419d6c42aa5e2eb770d6ed9d18bfa30' > /usr/local/pulledpork/etc/pulledpork.conf
+echo 'rule_url=https://snort.org/downloads/ip-block-list|IPBLOCKLIST|open' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'ignore= snort3-deleted.rules,snort3-experimental.rules' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'temp_path=/tmp' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'rule_path=/usr/local/snort/rules/snort.rules' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'local_rules=/usr/local/snort/rules/local.rules' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'sid_msg=/usr/local/snort/etc/snort/sid-msg.map' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'sid_msg_version=1' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'sid_changelog=/var/log/sid_changes.log' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'sorule_path=/usr/local/lib/snort_dynamicrules/' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'snort_path=/usr/local/snort/bin/snort' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'config_path=/usr/local/snort/etc/snort/snort.lua' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'distro=Centos-8' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'block_list=/usr/local/snort/intel/ip-blocklist' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'IPRVersion=/usr/local/snort/intel/' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'snort_control=/usr/local/bin/snort_control' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'pid_path=/var/log/snort/snort.pid' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'snort_version=3.0.0.0' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'enablesid=/usr/local/pulledpork/etc/enablesid.conf' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'dropsid=/usr/local/pulledpork/etc/dropsid.conf' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'disablesid=/usr/local/pulledpork/etc/disablesid.conf' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'modifysid=/usr/local/pulledpork/etc/modifysid.conf' >> /usr/local/pulledpork/etc/pulledpork.conf
+echo 'version=0.8.0' >> /usr/local/pulledpork/etc/pulledpork.conf
+cat /usr/local/pulledpork/etc/pulledpork.conf
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Create /etc/systemd/system/pulledpork.service                     '
+echo '__________________________________________________________________'
+echo [Unit] > /etc/systemd/system/pulledpork.service
+echo Description=PulledPork service for updating Snort 3 rules  >> /etc/systemd/system/pulledpork.service
+echo Wants=pulledpork.timer  >> /etc/systemd/system/pulledpork.service
+echo [Service]  >> /etc/systemd/system/pulledpork.service
+echo Type=oneshot  >> /etc/systemd/system/pulledpork.service
+echo ExecStart=perl /usr/local/pulledpork/pulledpork.pl -c /usr/local/pulledpork/etc/pulledpork.conf -PE -v -I security -T -H SIGHUP  >> /etc/systemd/system/pulledpork.service
+echo [Install]  >> /etc/systemd/system/pulledpork.service
+echo WantedBy=multi-user.target  >> /etc/systemd/system/pulledpork.service
+cat /etc/systemd/system/pulledpork.service
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Create /etc/systemd/system/pulledpork.timer                       '
+echo '__________________________________________________________________'
+echo [Unit] > /etc/systemd/system/pulledpork.timer
+echo Description=PulledPork service timer for updating Snort 3 rules >> /etc/systemd/system/pulledpork.timer
+echo Requires=pulledpork.service >> /etc/systemd/system/pulledpork.timer
+echo [Timer] >> /etc/systemd/system/pulledpork.timer
+echo Unit=pulledpork.service >> /etc/systemd/system/pulledpork.timer
+echo OnCalendar=*-*-* 00:10:00 >> /etc/systemd/system/pulledpork.timer
+echo AccuracySec=1us >> /etc/systemd/system/pulledpork.timer
+echo [Install] >> /etc/systemd/system/pulledpork.timer
+echo WantedBy=timers.target >> /etc/systemd/system/pulledpork.timer
+cat /etc/systemd/system/pulledpork.timer
+perl /usr/local/pulledpork/pulledpork.pl -c /usr/local/pulledpork/etc/pulledpork.conf -PE -v -I security -T -H
+perl /usr/local/pulledpork/pulledpork.pl -c /usr/local/pulledpork/etc/pulledpork.conf -PE -v -I security -T -H SIGHUP
+systemctl daemon-reload
+systemctl enable pulledpork.timer
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo 'Create /etc/systemd/system/snort.service                          '
+echo '__________________________________________________________________'
+echo [Unit] > /etc/systemd/system/snort.service
+echo Description=Snort 3 Intrusion Detection and Prevention service  >> /etc/systemd/system/snort.service
+echo After=syslog.target network.target  >> /etc/systemd/system/snort.service
+echo [Service]  >> /etc/systemd/system/snort.service
+echo Type=simple  >> /etc/systemd/system/snort.service
+echo ExecStart=/usr/local/snort/bin/snort -c /usr/local/snort/etc/snort/snort.lua --plugin-path /usr/local/snort/extra -i eno1:eno2 -l /var/log/snort -D -u snort -g snort --create-pidfile --tweaks custom_tweaks -k none --id-subdir >> /etc/systemd/system/snort.service
+echo ExecReload=/bin/kill -SIGHUP $MAINPID  >> /etc/systemd/system/snort.service
+echo User=snort  >> /etc/systemd/system/snort.service
+echo Group=snort  >> /etc/systemd/system/snort.service
+echo Restart=on-failure  >> /etc/systemd/system/snort.service
+echo RestartSec=5s  >> /etc/systemd/system/snort.service
+echo CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_IPC_LOCK  >> /etc/systemd/system/snort.service
+echo AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_IPC_LOCK  >> /etc/systemd/system/snort.service
+echo [Install]  >> /etc/systemd/system/snort.service
+echo WantedBy=multi-user.target  >> /etc/systemd/system/snort.service
+echo '__________________________________________________________________'
+echo '                                                                  '
+echo '                      DONE !                                      '
+echo '__________________________________________________________________'
+systemctl daemon-reload
+systemctl enable snort.service
+systemctl start snort.service
+ls -la /var/log/snort
+ps auxww | grep -i "snort"
+systemctl status snort.service
